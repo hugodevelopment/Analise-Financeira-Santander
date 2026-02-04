@@ -1,0 +1,103 @@
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+# --- CONFIGURAÇÃO ---
+COLUNA_DATA = 'Data'
+ARQUIVO_ENTRADA = "gastos_consolidados.csv"  # Usando o arquivo que você subiu
+ARQUIVO_SAIDA = 'gastos_consolidados_final.csv'
+
+def apply_transformations_intervalos(df_consolidado, coluna_data):
+    """
+    Aplica as transformações MES_FATURA e SEMANA_FATURA usando a lógica de 
+    intervalos explícitos (17 a 16) e mapeamento condicional.
+    """
+    df = df_consolidado.copy()
+
+    # Detecta datas sem ano e corrige com base no arquivo
+    mask_sem_ano = df[coluna_data].str.match(r'^\d{1,2}/\d{1,2}$', na=False)
+    df.loc[mask_sem_ano, coluna_data] = np.where(
+        df.loc[mask_sem_ano, 'Arquivo'].str.contains('fatura-jan', case=False),
+        df.loc[mask_sem_ano, coluna_data] + '/2024',
+        df.loc[mask_sem_ano, coluna_data] + '/2025'
+    )
+
+    # Converter para datetime
+    df[coluna_data] = pd.to_datetime(df[coluna_data], format='%d/%m/%Y', utc=True, errors='coerce')
+
+    # =================================================================
+    # 2. CRIAÇÃO da coluna MES_FATURA (Intervalos explícitos)
+    # =================================================================
+    start_dates = pd.to_datetime([
+        '2024-12-04', '2025-01-04', '2025-02-04', '2025-03-04',
+        '2025-04-04', '2025-05-04', '2025-05-04', '2025-07-04',
+        '2025-08-04', '2025-09-04', '2025-10-04', '2025-11-04'
+    ], utc=True)
+
+    end_dates = pd.to_datetime([
+        '2025-01-03', '2025-02-27', '2025-03-03', '2025-04-03',
+        '2025-05-03', '2025-06-03', '2025-07-03', '2025-08-03',
+        '2025-09-03', '2025-10-03', '2025-11-03', '2025-12-03'
+    ], utc=True)
+
+    rotulos_fatura = [
+        '2025-01 (JAN)', '2025-02 (FEV)', '2025-03 (MAR)', '2025-04 (ABR)', '2025-05 (MAI)',
+        '2025-06 (JUN)', '2025-07 (JUL)', '2025-08 (AGO)', '2025-09 (SET)',
+        '2025-10 (OUT)', '2025-11 (NOV)', '2025-12 (DEZ)'
+    ]
+
+    condicoes = []
+    for start, end in zip(start_dates, end_dates):
+        condicoes.append((df[coluna_data] >= start) & (df[coluna_data] <= end))
+
+    df['MES_FATURA'] = np.select(condicoes, rotulos_fatura)
+
+    # =================================================================
+    # 3. CRIAÇÃO da coluna SEMANA_FATURA
+    # =================================================================
+    dia = df[coluna_data].dt.day
+    condicoes_semana = [
+        (dia >= 1) & (dia <= 8),
+        (dia >= 9) & (dia <= 16),
+        (dia >= 17) & (dia <= 23),
+        (dia >= 24) & (dia <= 31)
+    ]
+    valores_semana = [1, 2, 3, 4]
+    df['SEMANA_FATURA'] = np.select(condicoes_semana, valores_semana, default=0)
+
+    # =================================================================
+    # 4. ANÁLISES ADICIONAIS
+    # =================================================================
+    # Comparação mensal com os valores menores de 0
+    gastos_mensais = df[df['Valor (R$)'] > 0].groupby('Arquivo')['Valor (R$)'].sum().reset_index()
+    gastos_mensais['VARIACAO_%'] = gastos_mensais['Valor (R$)'].pct_change() * 100
+
+    # Concentração de gastos (Top estabelecimentos)
+    concentracao = df[df['Valor (R$)'] > 0].groupby('Descrição')['Valor (R$)'].sum().reset_index()
+    concentracao['%_TOTAL'] = (concentracao['Valor (R$)'] / concentracao['Valor (R$)'].sum()) * 100
+    concentracao = concentracao.sort_values(by='Valor (R$)', ascending=False)
+
+    # =================================================================
+    # 5. EXPORTAÇÃO
+    # =================================================================
+    cols_finais = ['MES_FATURA', 'SEMANA_FATURA', coluna_data] + [
+        c for c in df.columns if c not in ['MES_FATURA', 'SEMANA_FATURA', coluna_data]
+    ]
+    df_exportar = df[cols_finais]
+    df_exportar.to_csv(ARQUIVO_SAIDA, index=False, encoding='utf-8')
+
+    print(f"\n--- SUCESSO! Arquivo salvo como: {ARQUIVO_SAIDA} ---")
+    print("\n>>> Comparação Mensal <<<")
+    print(gastos_mensais)
+    print("\n>>> Concentração de Gastos (Top 5) <<<")
+    print(concentracao.head(5))
+
+    return df_exportar, gastos_mensais, concentracao
+
+
+# ----------------- INÍCIO DA EXECUÇÃO -----------------
+try:
+    df_input = pd.read_csv(ARQUIVO_ENTRADA)
+    df_final, gastos_mensais, concentracao = apply_transformations_intervalos(df_input, COLUNA_DATA)
+except FileNotFoundError:
+    print(f"ERRO: Arquivo de entrada '{ARQUIVO_ENTRADA}' não encontrado.")
