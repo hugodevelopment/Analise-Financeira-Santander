@@ -22,6 +22,20 @@ st.set_page_config(
 def carregar_dados():
     df = pd.read_csv("gastos_consolidados_final.csv")
 
+
+     # 🔥 CONVERSÃO DA COLUNA VALOR
+    if 'Valor (R$)' in df.columns:
+        df['Valor (R$)'] = (
+            df['Valor (R$)']
+            .astype(str)
+            .str.replace('R$', '', regex=False)
+            .str.replace('.', '', regex=False)
+            .str.replace(',', '.', regex=False)
+            .str.strip()
+        )
+
+        df['Valor (R$)'] = pd.to_numeric(df['Valor (R$)'], errors='coerce')
+
     if 'Data' in df.columns:
         df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
         df['Mes'] = df['Data'].dt.to_period('M').astype(str)
@@ -280,39 +294,315 @@ st.dataframe(
 )
 
 # ========================================
-# CHAT LOCAL
+# 🤖 AGENTE INTELIGENTE LOCAL
 # ========================================
 
-st.subheader("🤖 Assistente")
+st.subheader("🤖 Assistente Financeiro Inteligente")
 
-pergunta = st.text_input("Pergunte algo:")
+pergunta = st.text_input("Pergunte qualquer coisa sobre seus gastos:")
 
-def responder(pergunta):
+# ========================================
+# INTENÇÕES SUPORTADAS
+# ========================================
 
-    pergunta = pergunta.lower()
+def detectar_intencao(texto):
 
-    if "onde gasto mais" in pergunta:
+    texto = texto.lower()
+
+    intents = {
+
+        "maior_gasto": [
+            "onde gasto mais",
+            "maior gasto",
+            "gasto mais",
+            "quem recebe mais dinheiro"
+        ],
+
+        "total": [
+            "total",
+            "quanto gastei",
+            "valor total",
+            "gasto total"
+        ],
+
+        "media": [
+            "media",
+            "médio",
+            "ticket medio"
+        ],
+
+        "contagem": [
+            "quantas compras",
+            "quantas transações",
+            "quantidade"
+        ],
+
+        "score": [
+            "score",
+            "nota financeira"
+        ],
+
+        "risco": [
+            "risco",
+            "perigo financeiro"
+        ],
+
+        "economizar": [
+            "economizar",
+            "como economizar",
+            "reduzir gastos"
+        ],
+
+        "previsao": [
+            "previsão",
+            "projeção",
+            "quanto vou gastar"
+        ],
+
+        "categoria": [
+            "categoria",
+            "qual categoria gasto mais"
+        ]
+    }
+
+    for intent, palavras in intents.items():
+
+        for palavra in palavras:
+
+            if palavra in texto:
+                return intent
+
+    return "desconhecido"
+
+
+# ========================================
+# EXECUTOR
+# ========================================
+
+def executar_intencao(intent):
+
+    if intent == "maior_gasto":
 
         top = pareto.iloc[0]
 
-        return f"Você gasta mais em {top['Descrição']} (R$ {top['Valor (R$)']:,.2f})"
+        return f"Você gasta mais em {top['Descrição']}, totalizando R$ {top['Valor (R$)']:,.2f}"
 
-    if "total" in pergunta:
+    elif intent == "total":
 
-        return f"Total gasto: R$ {total_gasto:,.2f}"
+        return f"Seu gasto total foi R$ {total_gasto:,.2f}"
 
-    if "score" in pergunta:
+    elif intent == "media":
 
-        return f"Seu score é {score}/100"
+        return f"Seu gasto médio por compra é R$ {ticket_medio:,.2f}"
 
-    if "economizar" in pergunta:
+    elif intent == "contagem":
 
-        economia = pareto.iloc[0]['Valor (R$)'] * 0.2
+        return f"Você fez {qtd_transacoes} transações"
 
-        return f"Você pode economizar R$ {economia:,.2f}"
+    elif intent == "score":
 
-    return "Pergunta não reconhecida"
+        if score >= 80:
+            nivel = "excelente"
+        elif score >= 60:
+            nivel = "bom"
+        else:
+            nivel = "precisa melhorar"
+
+        return f"Seu score financeiro é {score}/100, considerado {nivel}"
+
+    elif intent == "risco":
+
+        if concentracao > 50:
+            return "Seu risco financeiro é alto devido à alta concentração de gastos"
+
+        elif concentracao > 30:
+            return "Seu risco financeiro é moderado"
+
+        else:
+            return "Seu risco financeiro é baixo"
+
+    elif intent == "economizar":
+
+        top = pareto.iloc[0]
+
+        economia = top['Valor (R$)'] * 0.2
+
+        return f"Se reduzir 20% dos gastos em {top['Descrição']}, economizaria R$ {economia:,.2f}"
+
+    elif intent == "previsao":
+
+        return f"Sua previsão de gasto mensal é R$ {previsao:,.2f}"
+
+    elif intent == "categoria":
+
+        if 'Categoria' in gastos_positivos.columns:
+
+            cat = gastos_positivos.groupby('Categoria')['Valor (R$)'].sum().idxmax()
+
+            valor = gastos_positivos.groupby('Categoria')['Valor (R$)'].sum().max()
+
+            return f"Sua categoria com maior gasto é {cat}, com R$ {valor:,.2f}"
+
+        else:
+            return "Seu dataset não possui categorias"
+
+    else:
+
+        return gerar_resposta_generica()
+
+# ========================================
+# 🎯 ANÁLISE PROFUNDA DE PRIORIDADE FINANCEIRA
+# ========================================
+
+st.subheader("🎯 Análise de Prioridade Financeira")
+
+# ============================================
+# 2. FEATURE ENGINEERING
+# ============================================
+
+agrupado = df.groupby("Descrição").agg(
+    total=("Valor (R$)", "sum"),
+    frequencia=("Valor (R$)", "count"),
+    media=("Valor (R$)", "mean"),
+    meses_unicos=("mes", "nunique"),
+    maior_compra=("Valor (R$)", "max")
+)
+
+# impacto mensal REAL
+agrupado["impacto_mensal"] = agrupado["total"] / agrupado["meses_unicos"]
+
+# ============================================
+# 3. NORMALIZAÇÃO
+# ============================================
+
+def normalizar(coluna):
+    min_val = coluna.min()
+    max_val = coluna.max()
+    
+    if max_val == min_val:
+        return coluna * 0
+    
+    return (coluna - min_val) / (max_val - min_val)
+
+agrupado["total_norm"] = normalizar(agrupado["total"])
+agrupado["freq_norm"] = normalizar(agrupado["frequencia"])
+agrupado["media_norm"] = normalizar(agrupado["media"])
+agrupado["impacto_norm"] = normalizar(agrupado["impacto_mensal"])
+
+# ============================================
+# 4. SCORE DE PRIORIDADE
+# ============================================
+
+agrupado["score"] = (
+    0.4 * agrupado["impacto_norm"] +
+    0.3 * agrupado["total_norm"] +
+    0.2 * agrupado["freq_norm"] +
+    0.1 * agrupado["media_norm"]
+)
+
+# ============================================
+# 5. CLASSIFICAÇÃO
+# ============================================
+
+def classificar(score):
+
+    if score >= 0.75:
+        return "CRITICO"
+    
+    elif score >= 0.55:
+        return "ALTO"
+    
+    elif score >= 0.35:
+        return "MEDIO"
+    
+    else:
+        return "BAIXO"
+
+agrupado["prioridade"] = agrupado["score"].apply(classificar)
+
+# ============================================
+# 6. ECONOMIA POTENCIAL REALISTA
+# ============================================
+
+def potencial_economia(prioridade):
+
+    if prioridade == "CRITICO":
+        return 0.30
+    
+    elif prioridade == "ALTO":
+        return 0.20
+    
+    elif prioridade == "MEDIO":
+        return 0.10
+    
+    else:
+        return 0.05
+
+agrupado["economia_percentual"] = agrupado["prioridade"].apply(potencial_economia)
+
+agrupado["economia_mensal"] = (
+    agrupado["impacto_mensal"] *
+    agrupado["economia_percentual"]
+)
+
+# ============================================
+# 7. ORDENAR POR PRIORIDADE
+# ============================================
+
+agrupado = agrupado.sort_values("score", ascending=False)
+
+# ============================================
+# 8. RESULTADO FINAL
+# ============================================
+
+print("\n===== ANALISE DE PRIORIDADE DE GASTOS =====\n")
+
+for descricao, row in agrupado.iterrows():
+
+    print(f"{descricao}")
+    print(f"  Impacto mensal real: R$ {row['impacto_mensal']:.2f}")
+    print(f"  Maior compra: R$ {row['maior_compra']:.2f}")
+    print(f"  Frequência: {row['frequencia']}")
+    print(f"  Score: {row['score']:.2f}")
+    print(f"  Prioridade: {row['prioridade']}")
+    print(f"  Economia possível: R$ {row['economia_mensal']:.2f}/mês")
+    print()
+
+# ============================================
+# 9. RESUMO FINAL
+# ============================================
+
+economia_total = agrupado["economia_mensal"].sum()
+
+print("=====================================")
+print(f"ECONOMIA TOTAL POSSÍVEL: R$ {economia_total:.2f}/mês")
+print(f"ECONOMIA TOTAL POSSÍVEL: R$ {economia_total * 12:.2f}/ano")
+print("=====================================")
+
+# ============================================
+# 10. TOP 5 MAIORES PRIORIDADES
+# ============================================
+
+print("\n===== TOP PRIORIDADES =====\n")
+
+top5 = agrupado.head(5)
+
+for descricao, row in top5.iterrows():
+
+    print(f"Ação recomendada: reduzir gastos em {descricao}")
+    print(f"Impacto mensal: R$ {row['impacto_mensal']:.2f}")
+    print(f"Economia possível: R$ {row['economia_mensal']:.2f}/mês")
+    print(f"Prioridade: {row['prioridade']}")
+    print()
+
+# ========================================
+# EXECUÇÃO
+# ========================================
 
 if pergunta:
 
-    st.success(responder(pergunta))
+    intent = detectar_intencao(pergunta)
+
+    resposta = executar_intencao(intent)
+
+    st.success(resposta)
